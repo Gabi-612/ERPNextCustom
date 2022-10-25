@@ -192,8 +192,8 @@ class BOM(WebsiteGenerator):
 		self.calculate_cost()
 		self.update_exploded_items(save=False)
 		self.update_stock_qty()
-		self.validate_scrap_items()
 		self.update_cost(update_parent=False, from_child_bom=True, update_hour_rate=False, save=False)
+		self.validate_scrap_items()
 
 	def get_context(self, context):
 		context.parents = [{"name": "boms", "title": _("All BOMs")}]
@@ -240,6 +240,7 @@ class BOM(WebsiteGenerator):
 				"idx",
 				"hour_rate",
 				"set_cost_based_on_bom_qty",
+				"fixed_time",
 			]
 
 			for row in frappe.get_all(
@@ -778,7 +779,7 @@ class BOM(WebsiteGenerator):
 				bom_item.include_item_in_manufacturing,
 				bom_item.sourced_by_supplier,
 				bom_item.stock_qty / ifnull(bom.quantity, 1) AS qty_consumed_per_unit
-			FROM `tabBOM Explosion Item` bom_item, tabBOM bom
+			FROM `tabBOM Explosion Item` bom_item, `tabBOM` bom
 			WHERE
 				bom_item.parent = bom.name
 				AND bom.name = %s
@@ -861,6 +862,10 @@ class BOM(WebsiteGenerator):
 				if not d.batch_size or d.batch_size <= 0:
 					d.batch_size = 1
 
+	def get_tree_representation(self) -> BOMTree:
+		"""Get a complete tree representation preserving order of child items."""
+		return BOMTree(self.name)
+
 	def validate_scrap_items(self):
 		for item in self.scrap_items:
 			msg = ""
@@ -891,10 +896,6 @@ class BOM(WebsiteGenerator):
 
 			if msg:
 				frappe.throw(msg, title=_("Note"))
-
-	def get_tree_representation(self) -> BOMTree:
-		"""Get a complete tree representation preserving order of child items."""
-		return BOMTree(self.name)
 
 
 def get_bom_item_rate(args, bom_doc):
@@ -1018,7 +1019,6 @@ def get_bom_items_as_dict(
 			where
 				bom_item.docstatus < 2
 				and bom.name = %(bom)s
-				and ifnull(item.has_variants, 0) = 0
 				and item.is_stock_item in (1, {is_stock_item})
 				{where_conditions}
 				group by item_code, stock_uom
@@ -1116,7 +1116,7 @@ def validate_bom_no(item, bom_no):
 
 
 @frappe.whitelist()
-def get_children(doctype, parent=None, is_root=False, **filters):
+def get_children(parent=None, is_root=False, **filters):
 	if not parent or parent == "BOM":
 		frappe.msgprint(_("Please select a BOM"))
 		return
@@ -1305,7 +1305,7 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 		if not field in searchfields
 	]
 
-	query_filters = {"disabled": 0, "ifnull(end_of_life, '5050-50-50')": (">", today())}
+	query_filters = {"disabled": 0, "end_of_life": (">", today())}
 
 	or_cond_filters = {}
 	if txt:
